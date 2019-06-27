@@ -1,12 +1,4 @@
 
-type Date = i64;
-type Person = usize;
-type Submission = usize;
-type Comment = (Submission,Date,String,Person,Submission,Submission);
-type Know = (Person, Person);
-type Like = (Person, Submission);
-type Post = (Submission,Date,String,Person);
-type User = (Person, String);
 
 fn main() {
 
@@ -18,10 +10,10 @@ fn main() {
 
         // let path = std::env::args().nth(1).expect("Must supply path!");
 
-        let change_path = std::env::var("ChangePath").unwrap_or("None".to_string());
-        let run_index = std::env::var("RunIndex").unwrap_or("None".to_string());
-        let sequences = std::env::var("Sequences").unwrap_or("0".to_string()).parse::<usize>().expect("Couldn't parse Sequences as an integer");
-        let change_set = std::env::var("ChangeSet").unwrap_or("None".to_string());
+        let change_path = std::env::var("ChangePath").expect("ChangePath unspecified");
+        let run_index = std::env::var("RunIndex").expect("RunIndex unspecified");
+        let sequences = std::env::var("Sequences").expect("Sequences unspecified").parse::<usize>().expect("Couldn't parse Sequences as an integer");
+        let change_set = std::env::var("ChangeSet").expect("ChangeSet unspecified");
         let query = std::env::var("Query").unwrap_or("Q2".to_string());
         let tool = std::env::var("Tool").unwrap_or("None".to_string());
 
@@ -57,11 +49,11 @@ fn main() {
             use differential_dataflow::hashable::Hashable;
             use differential_dataflow::operators::arrange::arrangement::ArrangeBySelf;
 
-            let (comms_input, comms) = scope.new_collection::<Comment,_>();
-            let (knows_input, knows) = scope.new_collection::<Know,_>();
-            let (likes_input, likes) = scope.new_collection::<Like,_>();
-            let (posts_input, posts) = scope.new_collection::<Post,_>();
-            let (users_input,_users) = scope.new_collection::<User,_>();
+            let (comms_input, comms) = scope.new_collection();
+            let (knows_input, knows) = scope.new_collection();
+            let (likes_input, likes) = scope.new_collection();
+            let (posts_input, posts) = scope.new_collection();
+            let (users_input,_users) = scope.new_collection();
 
             // comms.inspect(|x| println!("Saw: {:?}", x));
 
@@ -70,17 +62,18 @@ fn main() {
             if query == "Q1" {
 
                 let liked_comments =
-                likes
+                likes.map(|vec: Vec<String>| (vec[0].clone(), vec[1].clone()))
                     .distinct()
                     .map(|(_user,comm)| (comm, ()))
                     .consolidate()
-                    .join(&comms.map(|(id,_,_,_,_,post)| (id, post)))
+                    .join(&comms.map(|vec: Vec<String>| (vec[0].clone(), vec[5].clone())))
                     .map(|(_,(_,post))| post)
                     .consolidate()
+                    //  .inspect(|x| println!("liked: {:?}", x))
                     ;
 
                 let comms_theyselves =
-                comms.explode(|comm| Some((comm.5, 10)));
+                comms.explode(|vec| Some((vec[5].clone(), 10)));
 
                 let post_score = 
                 liked_comments
@@ -90,17 +83,17 @@ fn main() {
 
                 let arrangement = 
                 post_score
-                    .concat(&posts.map(|post| post.0))
+                    .concat(&posts.map(|vec: Vec<String>| vec[0].clone()))
                     .count()
                     .map(|(post, count)| (post, count-1))
-                    .join(&posts.map(|post| (post.0, post.1.clone())))
-                    .map(|(post,(count, ts)): (Submission,(isize,Date))| (post.hashed() % 100, ((count, ts), post)))
+                    .join(&posts.map(|vec: Vec<String>| (vec[0].clone(), vec[1].clone())))
+                    .map(|(post,(count, ts)): (String, (isize,String))| (post.hashed() % 100, ((count, ts), post)))
                     .reduce(|_key, input, output| {
                         for ((_count, post), _wgt) in input.iter().rev().take(3) {
                             output.push(((_count.clone(), post.clone()), 1));
                         }
                     })
-                    .map(|(_hash, ((count, ts),post)): (u64, ((isize,Date), Submission))| ((), ((count, ts), post)))
+                    .map(|(_hash, ((count, ts),post)): (u64, ((isize,String), String))| ((), ((count, ts), post)))
                     .reduce(|_key, input, output| {
                         let mut string = format!("{}", (input[input.len()-1].0).1);
                         for ((_count, post), _wgt) in input.iter().rev().skip(1).take(2) {
@@ -129,22 +122,22 @@ fn main() {
                 use differential_dataflow::Collection;
                 use differential_dataflow::operators::iterate::Iterate;
 
-                let labels: Collection<_, (Person, Person, Submission)> =
+                let labels: Collection<_, (String, String, String)> =
                 likes           // node         label           comment
-                    .map(|(user, comm)| (user.clone(), user, comm))
+                    .map(|vec| (vec[0].clone(), vec[0].clone(), vec[1].clone()))
                     .iterate(|labels| {
 
-                        let knows = knows.enter(&labels.scope());
-                        let likes = likes.enter(&labels.scope());
+                        let knows = knows.enter(&labels.scope()).map(|vec: Vec<String>| (vec[0].clone(), vec[1].clone()));
+                        let likes = likes.enter(&labels.scope()).map(|vec: Vec<String>| (vec[0].clone(), vec[1].clone()));
 
                         labels
                             .map(|(node, label, comment)| (node, (label, comment)))
                             .join(&knows)
                             .map(|(_node, ((label, comment), dest))| ((dest, comment), label))
                             .semijoin(&likes)
-                            .concat(&likes.map(|(user, comm)| ((user, comm), user)))
+                            .concat(&likes.map(|(user, comm)| ((user.clone(), comm), user)))
                             .reduce(|_key, input, output| {
-                                output.push((*input[0].0, 1));
+                                output.push((input[0].0.clone(), 1));
                             })
                             .map(|((dest, comment), label)| (dest, label, comment))
 
@@ -155,21 +148,22 @@ fn main() {
                     .map(|(_node, label, comment)| (label, comment))
                     .count()
                     .explode(|((_label, comment), count)| Some((comment, count * count)))
-                    .concat(&comms.map(|comm| comm.0.clone()))
+                    .concat(&comms.map(|vec| vec[0].clone()))
                     .count()
                     .map(|(x, cnt)| (x, cnt-1))
                     ;
 
                 let arrangement =
                 comment_score
-                    .join(&comms.map(|comm| (comm.0.clone(), comm.1.clone())))
-                    .map(|(post,(count, ts)): (Submission, (isize,Date))| (post.hashed() % 100, ((count, ts), post)))
+                    .join(&comms.map(|vec| (vec[0].clone(), vec[1].clone())))
+                    // .map(|(comm, (count, ts))| ((), ((count, ts), comm)))
+                    .map(|(post,(count, ts)): (String, (isize,String))| (post.hashed() % 100, ((count, ts), post)))
                     .reduce(|_key, input, output| {
                         for ((_count, post), _wgt) in input.iter().rev().take(3) {
                             output.push(((_count.clone(), post.clone()), 1));
                         }
                     })
-                    .map(|(_hash, ((count, ts),post)): (u64, ((isize,Date), Submission))| ((), ((count, ts), post)))
+                    .map(|(_hash, ((count, ts),post)): (u64, ((isize,String), String))| ((), ((count, ts), post)))
                     .reduce(|_key, input, output| {
                         let mut string = format!("{}", (input[input.len()-1].0).1);
                         for ((_count, post), _wgt) in input.iter().rev().skip(1).take(2) {
@@ -211,23 +205,23 @@ fn main() {
         }
 
         for comm in comms {
-            comms_input.insert(strings_to_comm(comm));
+            comms_input.insert(comm);
         }
 
         for know in knows {
-            knows_input.insert(strings_to_know(know));
+            knows_input.insert(know);
         }
 
         for like in likes {
-            likes_input.insert(strings_to_like(like));
+            likes_input.insert(like);
         }
 
         for post in posts {
-            posts_input.insert(strings_to_post(post));
+            posts_input.insert(post);
         }
 
         for user in users {
-            users_input.insert(strings_to_user(user));
+            users_input.insert(user);
         }
 
         comms_input.advance_to(1); comms_input.flush();
@@ -288,6 +282,7 @@ fn main() {
                 println!("COULDN'T GET CURSOR")
             }
         }
+
         if index == 0 {
             println!("{:?};{:?};{};{};0;\"Initial\";\"Time\";{}", tool, query, change_set, run_index, timer.elapsed().as_nanos());
             timer = std::time::Instant::now();
@@ -302,11 +297,11 @@ fn main() {
             for mut change in changes {
                 let collection = change.remove(0);
                 match collection.as_str() {
-                    "Comments" => { comms_input.insert(strings_to_comm(change)); },
-                    "Friends" => { knows_input.insert(strings_to_know(change)); },
-                    "Likes" => { likes_input.insert(strings_to_like(change)); },
-                    "Posts" => { posts_input.insert(strings_to_post(change)); },
-                    "Users" => { users_input.insert(strings_to_user(change)); },
+                    "Comments" => { comms_input.insert(change); },
+                    "Friends" => { knows_input.insert(change); },
+                    "Likes" => { likes_input.insert(change); },
+                    "Posts" => { posts_input.insert(change); },
+                    "Users" => { users_input.insert(change); },
                     x => { panic!("Weird enum variant: {}", x); },
                 }
             }
@@ -320,6 +315,10 @@ fn main() {
             while probe.less_than(comms_input.time()) {
                 worker.step();
             }
+
+            use timely::order::PartialOrder;
+            use differential_dataflow::trace::TraceReader;
+            use differential_dataflow::trace::cursor::Cursor;
 
             if let Some(trace) = &mut q1_trace {
                 if let Some((mut cursor, storage)) = trace.cursor_through(&[round+1]) {
@@ -365,6 +364,7 @@ fn main() {
                     println!("COULDN'T GET CURSOR")
                 }
             }
+
             if index == 0 {
                 println!("{:?};{:?};{};{};{};\"Update\";\"Time\";{}", tool, query, change_set, run_index, round, timer.elapsed().as_nanos());
                 timer = std::time::Instant::now();
@@ -398,57 +398,4 @@ fn load_data(filename: &str, index: usize, peers: usize) -> Vec<Vec<String>> {
     }
     // println!("Loaded {} records for {}", data.len(), filename);
     data
-}
-
-
-
-fn strings_to_comm(comm: Vec<String>) -> Comment {
-    let mut iter = comm.into_iter();
-    let id = iter.next().unwrap().parse::<Submission>().unwrap();
-    let ts = iter.next().unwrap();
-    let mut split = ts.split_whitespace();
-    let date = split.next().unwrap();
-    let time = split.next().unwrap();
-    let ts = format!("{}T{}+00:00", date, time);
-    let ts = chrono::DateTime::parse_from_rfc3339(ts.as_str()).expect("Failed to parse DateTime").timestamp();
-    let content = iter.next().unwrap();
-    let creator = iter.next().unwrap().parse::<Person>().unwrap();
-    let parent = iter.next().unwrap().parse::<Submission>().unwrap();
-    let post = iter.next().unwrap().parse::<Submission>().unwrap();
-    (id, ts, content, creator, parent, post)
-}
-
-fn strings_to_know(know: Vec<String>) -> Know {
-    let mut iter = know.into_iter();
-    let person1 = iter.next().unwrap().parse::<Person>().unwrap();
-    let person2 = iter.next().unwrap().parse::<Person>().unwrap();
-    (person1, person2)
-}
-
-fn strings_to_like(like: Vec<String>) -> Like {
-    let mut iter = like.into_iter();
-    let person = iter.next().unwrap().parse::<Person>().unwrap();
-    let comment = iter.next().unwrap().parse::<Submission>().unwrap();
-    (person, comment)
-}
-
-fn strings_to_post(post: Vec<String>) -> Post {
-    let mut iter = post.into_iter();
-    let id = iter.next().unwrap().parse::<Submission>().unwrap();
-    let ts = iter.next().unwrap();
-    let mut split = ts.split_whitespace();
-    let date = split.next().unwrap();
-    let time = split.next().unwrap();
-    let ts = format!("{}T{}+00:00", date, time);
-    let ts = chrono::DateTime::parse_from_rfc3339(ts.as_str()).expect("Failed to parse DateTime").timestamp();
-    let content = iter.next().unwrap();
-    let creator = iter.next().unwrap().parse::<Person>().unwrap();
-    (id, ts, content, creator)
-}
-
-fn strings_to_user(user: Vec<String>) -> User {
-    let mut iter = user.into_iter();
-    let person = iter.next().unwrap().parse::<Person>().unwrap();
-    let name = iter.next().unwrap();
-    (person, name)
 }

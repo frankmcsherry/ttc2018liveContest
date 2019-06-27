@@ -3,11 +3,11 @@
     "Q1",
     "Q2"
   ],
-  "Tools": ["EMFSolutionYAMTL", "EMFSolutionYAMTL_Batch"],
+  "Tools": ["differential-old", "differential-old-08", "differential", "differential-new-08"],
   "ChangeSets": [
-    "1", "2", "4", "8", "16", "32", "64"
+    "1", "2", "4", "8", "16", "32", "64", "128", "256", "512"
   ],
   "Sequences": 20,
-  "Runs": 5,
+  "Runs": 1,
   "Timeout": 6000
 }
