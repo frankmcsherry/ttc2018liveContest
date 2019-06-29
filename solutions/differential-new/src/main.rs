@@ -372,26 +372,18 @@ where
 
     let comms_theyselves = comms.explode(|comm| Some((comm.5, 10)));
 
-    use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    use differential_dataflow::operators::reduce::ReduceCore;
-
     let post_score = 
     posts
         .map(|post| post.0)         // ensure all posts get a score.
         .concat(&liked_comments)    // likes contribute to posts.
         .concat(&comms_theyselves)  // comments contribute to posts.
-        // .count()
-        // .map(|(post, count)| (post, count-1))   // TODO: fuse count() and join() with arrangements.
-        .arrange_by_self()
-        .reduce_abelian::<_,OrdValSpine<_,_,_,_>>(|_k,s,t| t.push((s[0].1.clone(), 1)))
-        .join_map(
-            &posts.map(|post| (post.0, post.1.clone())), 
-            |post, count, ts| (post.clone(), (*count-1,ts.clone())),
-        );
+        .count()
+        .map(|(post, count)| (post, count-1))   // TODO: fuse count() and join() with arrangements.
+        .join(&posts.map(|post| (post.0, post.1.clone())));
 
     let arrangement = 
     limit(&post_score, 3)
-        .map(|vec| format!("{}|{}|{}", vec[0], vec[1], vec[2]))
+        .map(|vec| format!("{}|{}|{}", vec[0],vec[1],vec[2]))
         .arrange_by_self();
 
     arrangement.stream.probe_with(probe);
@@ -440,32 +432,23 @@ where
                 })
         });
 
-    use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    use differential_dataflow::operators::reduce::ReduceCore;
-
-    let comm_score =
+    let comment_score =
     labels
         .map(|((_node, comment), label)| (label, comment))
         .count()
         .explode(|((_label, comment), count)| Some((comment, count * count)))
         .concat(&comms.map(|comm| comm.0.clone()))
-        .arrange_by_self()
-        .reduce_abelian::<_,OrdValSpine<_,_,_,_>>(|_k,s,t| t.push((s[0].1.clone(), 1)))
-        .join_map(
-            &comms.map(|comm| (comm.0.clone(), comm.1.clone())),
-            |post, count, ts| (post.clone(), (*count-1,ts.clone())),
-        );
-        // .count()
-        // .map(|(x, cnt)| (x, cnt-1)) // TODO: fuse count() and join() with arrangements.
-        // ;
+        .count()
+        .map(|(x, cnt)| (x, cnt-1)) // TODO: fuse count() and join() with arrangements.
+        ;
 
-    // let comm_score =
-    // comment_score
-    //     .join(&comms.map(|comm| (comm.0.clone(), comm.1.clone())));
+    let comm_score =
+    comment_score
+        .join(&comms.map(|comm| (comm.0.clone(), comm.1.clone())));
 
     let arrangement = 
     limit(&comm_score, 3)
-        .map(|vec| format!("{}|{}|{}", vec[0], vec[1], vec[2]))
+        .map(|vec| format!("{}|{}|{}", vec[0],vec[1],vec[2]))
         .arrange_by_self();
 
     arrangement.stream.probe_with(probe);

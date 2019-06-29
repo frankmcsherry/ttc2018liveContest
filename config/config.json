@@ -3,7 +3,7 @@
     "Q1",
     "Q2"
   ],
-  "Tools": ["differential-old", "differential-old-08", "differential", "differential-new-08"],
+  "Tools": ["differential-old", "differential", "differential-new" ],
   "ChangeSets": [
     "1", "2", "4", "8", "16", "32", "64", "128", "256", "512"
   ],
